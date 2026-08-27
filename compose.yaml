@@ -1,0 +1,36 @@
+services:
+  db:
+    image: postgres:16
+    environment:
+      POSTGRES_USER: todo
+      POSTGRES_PASSWORD: devpass
+      POSTGRES_DB: todo
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+    healthcheck:
+      test: [ "CMD-SHELL", "pg_isready -U todo -d todo" ]
+      interval: 5s
+      timeout: 5s
+      retries: 5
+  migrate:
+    build: .
+    command: flask --app app db upgrade
+    environment:
+      DATABASE_URL: postgresql+psycopg://todo:devpass@db:5432/todo
+      SECRET_KEY: ${SECRET_KEY}
+    depends_on:
+      db:
+        condition: service_healthy
+  app:
+    build: .
+    environment:
+      DATABASE_URL: postgresql+psycopg://todo:devpass@db:5432/todo
+      SECRET_KEY: ${SECRET_KEY}
+    ports:
+      - "3001:3000"
+    depends_on:
+      migrate:
+        condition: service_completed_successfully
+
+volumes:
+  postgres_data:
