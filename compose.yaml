@@ -7,6 +7,7 @@ services:
       POSTGRES_DB: todo
     volumes:
       - postgres_data:/var/lib/postgresql/data
+      - ./scripts/init-test-db.sql:/docker-entrypoint-initdb.d/init-test-db.sql
     healthcheck:
       test: [ "CMD-SHELL", "pg_isready -U todo -d todo" ]
       interval: 5s
@@ -17,7 +18,7 @@ services:
     command: flask --app app db upgrade
     environment:
       DATABASE_URL: postgresql+psycopg://todo:devpass@db:5432/todo
-      SECRET_KEY: ${SECRET_KEY}
+      SECRET_KEY: ${SECRET_KEY:?SECRET_KEY must be set}
     depends_on:
       db:
         condition: service_healthy
@@ -25,7 +26,7 @@ services:
     build: .
     environment:
       DATABASE_URL: postgresql+psycopg://todo:devpass@db:5432/todo
-      SECRET_KEY: ${SECRET_KEY}
+      SECRET_KEY: ${SECRET_KEY:?SECRET_KEY must be set}
     ports:
       - "3001:3000"
     depends_on:
