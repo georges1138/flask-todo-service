@@ -1,4 +1,5 @@
 # Flask ToDo App
+![Tests](https://github.com/georges1138/flask-todo-service/actions/workflows/tests.yml/badge.svg)
 
 A multi-user ToDo web application built with Flask using a layered MVC-style architecture.
 
