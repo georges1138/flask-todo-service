@@ -7,7 +7,7 @@
     <link rel="stylesheet" href="{{ url_for('static', filename='styles.css') }}">
 </head>
 <body>
-    <h1>Login or Register</h1>
+    <h1>Login</h1>
 
     <!-- Display flash messages (for errors or successful registration) -->
     {% with messages = get_flashed_messages() %}
@@ -22,14 +22,28 @@
 
     <!-- Form for registration and login -->
     <form method="POST">
-        <label for="username">Username:</label>
-        <input type="text" id="username" name="username" required><br><br>
+        <label for="login_username">Username:</label>
+        <input type="text" id="login_username" name="username" required><br><br>
 
-        <label for="password">Password:</label>
-        <input type="password" id="password" name="password" required><br><br>
+        <label for="login_password">Password:</label>
+        <input type="password" id="login_password" name="password" required><br><br>
 
         <!-- Buttons to either register or login -->
         <button type="submit" formaction="{{ url_for('user.login') }}">Login</button>
+    </form>
+    <br><br><br>
+    <h1>Register</h1>
+    <form method="POST">
+        <label for="register_username">Username:</label>
+        <input type="text" id="register_username" name="username" required><br><br>
+
+        <label for="register_email">Email:</label>
+        <input type="email" id="register_email" name="email" required><br><br>
+
+        <label for="register_password">Password:</label>
+        <input type="password" id="register_password" name="password" required><br><br>
+
+        <!-- Buttons to either register or login -->
         <button type="submit" formaction="{{ url_for('user.register') }}">Register</button>
     </form>
 </body>

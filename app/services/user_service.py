@@ -4,9 +4,9 @@ from models.user import User, db
 class UserService:
 
     @staticmethod
-    def register(username, password):
+    def register(username, email, password):
         stmt = db.select(User).where(
-            User.username == username
+            (User.username == username) | (User.email == email)
         )
 
         existing_user = db.session.execute(
@@ -16,7 +16,7 @@ class UserService:
         if existing_user:
             return None
 
-        new_user = User(username=username)
+        new_user = User(username=username, email=email)
         new_user.set_password(password)
 
         db.session.add(new_user)

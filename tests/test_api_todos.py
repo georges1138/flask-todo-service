@@ -9,8 +9,9 @@ from services.todo_service import TodoService
 def authenticated_api_user(app):
     # Create a real user with a real password hash
     user = UserService.register(
-        "alice",
-        "correct-password"
+        username="alice",
+        email="alice@example.com",
+        password="correct-password",
     )
 
     # Issue a real API token for that user
@@ -59,8 +60,9 @@ def test_get_todos_returns_only_authenticated_users_todos(
 
     # Create another user
     other_user = UserService.register(
-        "bob",
-        "another-password"
+        username="bob",
+        email="bob@example.com",
+        password="another-password",
     )
 
     # Create a todo owned by the OTHER user
@@ -169,8 +171,9 @@ def test_get_single_todo_does_not_expose_other_users_todo(
 
     # Create another user.
     other_user = UserService.register(
-        "bob",
-        "another-password"
+        username="bob",
+        email="bob@example.com",
+        password="another-password",
     )
 
     # Create a Todo belonging to Bob.
@@ -429,8 +432,9 @@ def test_update_todo_does_not_update_other_users_todo(
     raw_token = authenticated_api_user["raw_token"]
 
     other_user = UserService.register(
-        "bob",
-        "another-password"
+        username="bob",
+        email="bob@example.com",
+        password="another-password",
     )
 
     other_todo = TodoService.add(
@@ -529,8 +533,9 @@ def test_delete_todo_does_not_delete_other_users_todo(
     raw_token = authenticated_api_user["raw_token"]
 
     other_user = UserService.register(
-        "bob",
-        "another-password"
+        username="bob",
+        email="bob@example.com",
+        password="another-password",
     )
 
     other_todo = TodoService.add(
@@ -688,8 +693,9 @@ def test_toggle_todo_completion_does_not_change_other_users_todo(
     raw_token = authenticated_api_user["raw_token"]
 
     other_user = UserService.register(
-        "bob",
-        "another-password"
+        username="bob",
+        email="bob@example.com",
+        password="another-password",
     )
 
     other_todo = TodoService.add(

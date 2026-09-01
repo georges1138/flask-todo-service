@@ -3,6 +3,7 @@ import pytest
 from models import db
 from models.user import User
 from models.todo import Todo
+from models.sync_job import SyncJob
 from services.todo_service import TodoService
 
 
@@ -10,11 +11,13 @@ from services.todo_service import TodoService
 def todo_scenario(app):
     user_a = User(
         username='alice',
+        email='alice@example.com',
         password_hash='fake-hash-a'
     )
 
     user_b = User(
         username='bob',
+        email='bob@example.com',
         password_hash='fake-hash-b'
     )
 
@@ -47,7 +50,8 @@ def todo_scenario(app):
 def test_add_todo(app):
     user = User(
         username="alice",
-        password_hash="fake-hash"
+        email="alice@example.com",
+        password_hash="fake-hash",
     )
 
     db.session.add(user)
@@ -201,6 +205,26 @@ def test_toggle_complete_marks_owners_todo_complete(todo_scenario):
     assert updated_todo.completed is True
     assert updated_todo.completed_at is not None
 
+    filters = [SyncJob.source_todo_id == todo_a_id]
+    stmt = (
+        db.select(db.func.count())
+        .select_from(SyncJob)
+        .where(*filters)
+    )
+    assert db.session.scalar(stmt) == 1
+
+    stmt = (
+        db.select(SyncJob).where(*filters)
+    )
+    test_job = db.session.execute(
+        stmt
+    ).scalar_one_or_none()
+
+    assert test_job.email_address == updated_todo.user.email
+    assert test_job.source_todo_id == updated_todo.todo_id
+    assert test_job.todo_title == updated_todo.title
+    assert test_job.completed_at == updated_todo.completed_at
+
 
 def test_toggle_complete_does_not_change_other_users_todo(todo_scenario):
     user_a = todo_scenario['user_a']
@@ -250,3 +274,42 @@ def test_toggle_complete_twice_restores_incomplete_state(todo_scenario):
     assert todo is not None
     assert todo.completed is False
     assert todo.completed_at is None
+
+    filters = [SyncJob.source_todo_id == todo_a_id]
+    stmt = (
+        db.select(db.func.count())
+        .select_from(SyncJob)
+        .where(*filters)
+    )
+    assert db.session.scalar(stmt) == 1
+
+
+def test_recompleted_todo_creates_new_sync_job(todo_scenario):
+    user_a = todo_scenario["user_a"]
+    todo_a = todo_scenario["todo_a"]
+    todo_a_id = todo_a.todo_id
+
+    # complete the Todo once
+    TodoService.toggle_complete(
+        user_a.id,
+        todo_a_id,
+    )
+    # reopen it
+    TodoService.toggle_complete(
+        user_a.id,
+        todo_a_id,
+    )
+    # complete it again
+    TodoService.toggle_complete(
+        user_a.id,
+        todo_a_id,
+    )
+    stmt = db.select(SyncJob).where(
+        SyncJob.source_todo_id == todo_a_id
+    )
+    rows = db.session.execute(
+        stmt
+    ).scalars().all()
+
+    assert len(rows) == 2
+    assert rows[0].idempotency_key != rows[1].idempotency_key

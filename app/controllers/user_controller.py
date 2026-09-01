@@ -16,13 +16,14 @@ def auth_page():
 @user_controller.route('/register', methods=['POST'])
 def register():
     username = request.form['username']
+    email = request.form['email']
     password = request.form['password']
-    user = user_service.register(username, password)
+    user = user_service.register(username, email, password)
     if user:
         flash("Registration successful! Please log in.")
         return redirect(url_for('user.auth_page'))
     else:
-        flash("User already exists.")
+        flash("User or email already exists.")
         return redirect(url_for('user.auth_page'))
 
 

@@ -10,7 +10,8 @@ def user_scenario(app):
     password = "test_password"
 
     exist_user = User(
-        username='existing_user',
+        username="existing_user",
+        email="existing_user@example.com"
     )
 
     exist_user.set_password(password)
@@ -19,18 +20,20 @@ def user_scenario(app):
     db.session.commit()
 
     return {
-        'exist_user': exist_user,
-        'password': password,
+        "exist_user": exist_user,
+        "password": password,
     }
 
 
 def test_register_new_user(app):
-    username = 'test_user'
-    password = 'test_password'
+    username = "test_user"
+    email = "test_user@example.com"
+    password = "test_password"
 
     result = UserService.register(
         username=username,
-        password=password
+        email=email,
+        password=password,
     )
 
     assert result is not None
@@ -47,6 +50,7 @@ def test_register_new_user(app):
 
     assert new_user is not None
     assert new_user.check_password(password)
+    assert new_user.email == email
 
 
 def test_register_dup_user(user_scenario):
@@ -55,7 +59,20 @@ def test_register_dup_user(user_scenario):
 
     result = UserService.register(
         username=exist_user.username,
-        password=password
+        email="not_exist_user@example.com",
+        password=password,
+    )
+
+    assert result is None
+
+
+def test_register_duplicate_email(user_scenario):
+    exist_user = user_scenario["exist_user"]
+
+    result = UserService.register(
+        username="not_exist_user",
+        email=exist_user.email,
+        password="another_password",
     )
 
     assert result is None

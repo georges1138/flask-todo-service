@@ -11,7 +11,8 @@ from services.token_service import TokenService
 def token_user(app):
     user = User(
         username="alice",
-        password_hash="fake-hash"
+        email="alice@example.com",
+        password_hash="fake-hash",
     )
     db.session.add(user)
     db.session.commit()

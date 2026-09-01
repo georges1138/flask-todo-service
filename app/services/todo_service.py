@@ -1,6 +1,8 @@
 from datetime import datetime, timezone
 from models.todo import Todo, db
 
+from services.sync_job_service import SyncJobService
+
 class TodoService:
     @staticmethod
     def get_all(user_id, sort_by=None, filter_by=None):
@@ -77,6 +79,13 @@ class TodoService:
         else:
             todo.completed = True
             todo.completed_at = datetime.now(timezone.utc)
+
+            SyncJobService.create_completion_email_job(
+                email_address=todo.user.email,
+                source_todo_id=todo.todo_id,
+                todo_title=todo.title,
+                completed_at=todo.completed_at,
+            )
 
         db.session.commit()
 

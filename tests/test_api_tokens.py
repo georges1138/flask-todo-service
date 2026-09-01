@@ -9,11 +9,13 @@ from services.token_service import TokenService
 @pytest.fixture
 def api_user(app):
     username = "alice"
+    email = "alice@example.com"
     password = "correct-password"
 
     user = UserService.register(
         username,
-        password
+        email,
+        password,
     )
 
     return {

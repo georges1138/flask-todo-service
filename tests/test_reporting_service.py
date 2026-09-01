@@ -12,12 +12,14 @@ from services.reporting_service import ReportingService
 def reporting_scenario(app):
     user_a = User(
         username='alice',
-        password_hash='fake-hash-a'
+        email='alice@example.com',
+        password_hash='fake-hash-a',
     )
 
     user_b = User(
         username='bob',
-        password_hash='fake-hash-b'
+        email='bob@example.com',
+        password_hash='fake-hash-b',
     )
 
     db.session.add_all([user_a, user_b])
