@@ -55,7 +55,7 @@ class SyncJob(db.Model):
 
     next_attempt_at = db.Column(
         db.DateTime(timezone=True),
-        nullable=False,
+        nullable=True,
     )
 
     lease_expires_at = db.Column(
