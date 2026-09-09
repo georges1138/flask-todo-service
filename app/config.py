@@ -13,3 +13,11 @@ class Config:
     )
 
     SQLALCHEMY_TRACK_MODIFICATIONS = False
+
+    SYNC_JOB_MAX_ATTEMPTS = int(
+        os.environ.get("SYNC_JOB_MAX_ATTEMPTS", "3")
+    )
+
+    SYNC_JOB_BASE_DELAY_SECONDS = int(
+        os.environ.get("SYNC_JOB_BASE_DELAY_SECONDS", "2")
+    )

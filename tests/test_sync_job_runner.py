@@ -23,6 +23,8 @@ def test_main_wires_email_client_and_worker(monkeypatch):
     fake_app = Flask(__name__)
     fake_app.config["EMAIL_SERVICE_URL"] = "http://email-service.test"
     fake_app.config["SYNC_JOB_POLL_INTERVAL_SECONDS"] = 7
+    fake_app.config["SYNC_JOB_MAX_ATTEMPTS"] = 5
+    fake_app.config["SYNC_JOB_BASE_DELAY_SECONDS"] = 10
     captured = {}
 
     class FakeEmailClient:
@@ -38,9 +40,11 @@ def test_main_wires_email_client_and_worker(monkeypatch):
             pass
 
     class FakeSyncJobWorker:
-        def __init__(self, email_client, poll_interval_seconds):
+        def __init__(self, email_client, poll_interval_seconds, max_attempts, base_delay_seconds):
             captured["worker_email_client"] = email_client
             captured["poll_interval_seconds"] = poll_interval_seconds
+            captured["max_attempts"] = max_attempts
+            captured["base_delay_seconds"] = base_delay_seconds
 
         def run_forever(self):
             captured["run_forever_called"] = True
@@ -69,5 +73,6 @@ def test_main_wires_email_client_and_worker(monkeypatch):
     )
 
     assert captured["poll_interval_seconds"] == 7
-
+    assert captured["max_attempts"] == 5
+    assert captured["base_delay_seconds"] == 10
     assert captured["run_forever_called"] is True

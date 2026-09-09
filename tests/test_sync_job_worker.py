@@ -103,7 +103,7 @@ def test_run_once_schedules_retry_when_email_fails(app):
     db.session.add(job)
     db.session.commit()
 
-    worker = SyncJobWorker(FailingEmailClient())
+    worker = SyncJobWorker(FailingEmailClient(), max_attempts=5, base_delay_seconds=10)
 
     before = datetime.now(timezone.utc)
 
@@ -121,9 +121,9 @@ def test_run_once_schedules_retry_when_email_fails(app):
     assert reloaded_job.lease_expires_at is None
     assert reloaded_job.next_attempt_at is not None
     assert (
-            before + timedelta(seconds=2)
+            before + timedelta(seconds=10)
             <= reloaded_job.next_attempt_at
-            <= after + timedelta(seconds=2)
+            <= after + timedelta(seconds=10)
     )
 
 
@@ -174,3 +174,35 @@ def test_run_forever_sleeps_only_when_no_job(app):
 
     mock_sleep.assert_called_once()
     mock_sleep.assert_called_with(3)
+
+
+def test_run_once_uses_configured_max_attempts_when_email_fails(app):
+    now = datetime.now(timezone.utc)
+
+    job = SyncJob(
+        idempotency_key="worker-max-attempts",
+        job_type="email_notification",
+        email_address="alice@example.com",
+        source_todo_id=24,
+        todo_title="Uses configured max attempts",
+        completed_at=now,
+        status="pending",
+        attempt_count=2,
+        next_attempt_at=now,
+    )
+
+    db.session.add(job)
+    db.session.commit()
+
+    worker = SyncJobWorker(
+        FailingEmailClient(),
+        max_attempts=5,
+    )
+
+    result = worker.run_once()
+    assert result is True
+    db.session.expire_all()
+    reloaded_job = db.session.get(SyncJob, job.id)
+
+    assert reloaded_job.attempt_count == 3
+    assert reloaded_job.status == "retry_pending"

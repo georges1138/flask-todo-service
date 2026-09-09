@@ -15,6 +15,8 @@ def main():
             )
 
         poll_interval_seconds = app.config["SYNC_JOB_POLL_INTERVAL_SECONDS"]
+        max_attempts = app.config["SYNC_JOB_MAX_ATTEMPTS"]
+        base_delay_seconds = app.config["SYNC_JOB_BASE_DELAY_SECONDS"]
 
         with EmailClient(
                 base_url=email_service_url,
@@ -22,6 +24,8 @@ def main():
             worker = SyncJobWorker(
                 email_client,
                 poll_interval_seconds=poll_interval_seconds,
+                max_attempts=max_attempts,
+                base_delay_seconds=base_delay_seconds,
             )
 
             worker.run_forever()

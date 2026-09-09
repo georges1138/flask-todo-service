@@ -47,6 +47,8 @@ services:
       SECRET_KEY: ${SECRET_KEY:?SECRET_KEY must be set}
       EMAIL_SERVICE_URL: http://email_stub:4000
       SYNC_JOB_POLL_INTERVAL_SECONDS: 1
+      SYNC_JOB_MAX_ATTEMPTS: 3
+      SYNC_JOB_BASE_DELAY_SECONDS: 2
     depends_on:
       migrate:
         condition: service_completed_successfully
