@@ -505,7 +505,7 @@ def test_schedule_retry_or_fail_second_failure_uses_exponential_backoff(app):
     )
 
 
-def test_schedule_retry_or_fail_third_failure_marks_failed(app):
+def test_schedule_retry_or_fail_third_failure_marks_dead_letter(app):
     now = datetime.now(timezone.utc)
 
     job = SyncJob(
@@ -532,7 +532,7 @@ def test_schedule_retry_or_fail_third_failure_marks_failed(app):
     )
 
     assert result.attempt_count == 3
-    assert result.status == "failed"
+    assert result.status == "dead_letter"
     assert result.last_error == "email service still unavailable"
     assert result.lease_expires_at is None
     assert result.next_attempt_at is None
@@ -540,7 +540,7 @@ def test_schedule_retry_or_fail_third_failure_marks_failed(app):
     db.session.expire_all()
     reloaded_job = db.session.get(SyncJob, job.id)
     assert result.status == reloaded_job.status
-    assert reloaded_job.status == "failed"
+    assert reloaded_job.status == "dead_letter"
     assert reloaded_job.lease_expires_at is None
     assert reloaded_job.last_error == "email service still unavailable"
     assert reloaded_job.next_attempt_at is None

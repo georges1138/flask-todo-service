@@ -87,7 +87,7 @@ class SyncJobService:
         job.lease_expires_at = None
 
         if job.attempt_count >= max_attempts:
-            job.status = "failed"
+            job.status = "dead_letter"
             job.next_attempt_at = None
         else:
             job.status = "retry_pending"

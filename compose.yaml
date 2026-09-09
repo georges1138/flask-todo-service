@@ -34,6 +34,24 @@ services:
     depends_on:
       migrate:
         condition: service_completed_successfully
+  email_stub:
+    build:
+      context: ./email_stub
+    ports:
+      - "4000:4000"
+  worker:
+    build: .
+    command: python -m services.sync_job_runner
+    environment:
+      DATABASE_URL: postgresql+psycopg://todo:devpass@db:5432/todo
+      SECRET_KEY: ${SECRET_KEY:?SECRET_KEY must be set}
+      EMAIL_SERVICE_URL: http://email_stub:4000
+      SYNC_JOB_POLL_INTERVAL_SECONDS: 1
+    depends_on:
+      migrate:
+        condition: service_completed_successfully
+      email_stub:
+        condition: service_started
 
 volumes:
   postgres_data:
