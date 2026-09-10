@@ -14,11 +14,17 @@ The application supports authenticated users, per-user Todo ownership, completio
 - Add, edit, delete, filter, and sort Todos
 - Mark Todos as complete or reopen them
 - Completion timestamps
+- Durable Todo-completion notification jobs recorded in the same transaction as the completion itself
+- Background worker that delivers completion notifications outside the web request cycle
+- Automatic retries with exponential backoff and dead-letter handling once attempts are exhausted
+- Lease-based job claiming for safe concurrent workers and crash recovery
+- Idempotent email delivery keyed per notification, so an at-least-once redelivery has no duplicate effect
+- Local email stub service for development and testing
 - Light and dark themes
 - Custom error handling
 - Versioned PostgreSQL schema migrations with Flask-Migrate / Alembic
 - Single-command Docker Compose environment with orchestrated migrations
-- 56 automated pytest tests running against PostgreSQL, executed in CI on every push
+- 88 automated pytest tests running against PostgreSQL, executed in CI on every push
 - Per-user weekly completion statistics
 - Cumulative completion rates
 
@@ -29,6 +35,7 @@ The application supports authenticated users, per-user Todo ownership, completio
 - **Flask-SQLAlchemy / SQLAlchemy 2.0** — ORM and database access
 - **PostgreSQL 16** — application and test database
 - **Psycopg 3** — PostgreSQL driver
+- **httpx** — HTTP client used by the background worker to call the email service
 - **Flask-Migrate / Alembic** — database schema migrations
 - **Gunicorn** — WSGI server used by the container image
 - **Docker / Docker Compose** — containerized application, PostgreSQL, and migration orchestration
@@ -47,11 +54,15 @@ The application supports authenticated users, per-user Todo ownership, completio
 │   ├── middlewares/       # Authentication and error handling
 │   ├── migrations/        # Alembic migration environment and revisions
 │   ├── models/            # SQLAlchemy database models
-│   ├── services/          # Business logic and database operations
+│   ├── services/          # Business logic, sync jobs, background worker, email client
 │   ├── static/            # CSS and static assets
 │   ├── templates/         # Jinja2 templates
 │   ├── app.py             # Flask application factory and entry point
 │   └── config.py          # Application configuration
+│
+├── email_stub/
+│   ├── app.py             # Local email service stub (idempotent POST /emails)
+│   └── Dockerfile         # Email stub image
 │
 ├── scripts/
 │   └── init-test-db.sql   # Creates todo_test on first PostgreSQL initialization
@@ -62,7 +73,7 @@ The application supports authenticated users, per-user Todo ownership, completio
 │
 ├── tests/                 # pytest test suite
 ├── Dockerfile             # Application image (uv install, non-root user, Gunicorn)
-├── compose.yaml           # db + migrate + app orchestration
+├── compose.yaml           # db + migrate + app + email_stub + worker orchestration
 ├── .dockerignore          # Build context exclusions
 ├── .env.example           # Environment variable template
 ├── pyproject.toml         # Project metadata and dependencies
@@ -83,7 +94,7 @@ The application separates responsibilities across several layers:
 
 ## Getting Started
 
-Docker Compose is the recommended way to run this project. It starts PostgreSQL, waits for it to become healthy, applies all Alembic migrations, and then starts the application under Gunicorn.
+Docker Compose is the recommended way to run this project. It starts PostgreSQL, waits for it to become healthy, applies all Alembic migrations, and then starts the application under Gunicorn along with the background worker and the local email stub it delivers notifications to.
 
 ### 1. Clone the repository
 
@@ -126,19 +137,25 @@ To stop the stack, press `Ctrl+C`, or run `docker compose down`. Use `docker com
 
 ### What Compose does
 
-The three services run in a strict order, enforced by health and completion conditions rather than by sleeps or retries:
+Compose coordinates five services using health and completion dependencies rather than sleeps or retries. `db` and `email_stub` start independently; the rest wait on the conditions shown below:
 
 ```text
-db → healthy (pg_isready)
-      ↓
-migrate → flask db upgrade → exits successfully
-      ↓
-app → gunicorn on localhost:3001
+db → healthy (pg_isready)          email_stub → started
+      ↓                                              ↓
+migrate → flask db upgrade → exits successfully      │
+      ↓                          ↓                   │
+     app                       worker ←──────────────┘
+gunicorn on localhost:3001   polls sync_jobs and POSTs
+                             completion emails to the stub
 ```
 
-`migrate` waits for `db` to report `service_healthy`, and `app` waits for `migrate` to report `service_completed_successfully`. The application container therefore never starts against an unmigrated schema.
+`migrate` waits for `db` to report `service_healthy`. Both `app` and `worker` wait for `migrate` to report `service_completed_successfully`, so neither the application nor the worker container ever starts against an unmigrated schema.
 
-The application listens on port `3000` inside the container and is published on host port `3001` (`3001:3000`).
+`worker` additionally waits for `email_stub` to report `service_started`. That condition means the container has started, not that the Flask stub is already accepting connections, so the worker may make its first delivery attempt before the stub is listening. That is safe here precisely because a connection failure is just another failed attempt: the job moves to `retry_pending` and is picked up again after a backoff.
+
+`migrate` is intentionally a **one-shot** service. It runs `flask db upgrade`, exits with status `0`, and stays exited for the life of the stack. Seeing `migrate` in an exited state after `docker compose up` is the expected outcome, not a failure — a non-zero exit is what signals a broken migration, and it blocks `app` and `worker` from starting at all.
+
+The application listens on port `3000` inside the container and is published on host port `3001` (`3001:3000`). The email stub listens on port `4000` and is published on host port `4000`.
 
 ### Manual local development
 
@@ -181,6 +198,8 @@ uv run python app.py
 
 The manually launched application listens on `http://localhost:3000`, not `3001`.
 
+**Note:** To process completion notifications during manual development, also run the worker in a second terminal as described below.
+
 ## Running Tests
 
 Tests run against the separate PostgreSQL `todo_test` database, never the application `todo` database.
@@ -206,7 +225,9 @@ uv run pytest -v
 ```
 > **Note:** Compose publishes PostgreSQL on localhost:5432 so host-side Flask development and pytest can connect to the containerized database.
 
-The current suite contains **56 tests** covering Todo ownership and CRUD behavior, completion-state rules, user registration and authentication, API token authentication, Todo API CRUD and authorization behavior, JSON error handling, and PostgreSQL-backed reporting behavior including weekly bucketing, cumulative completion rates, per-user window partitions, and scoped reporting.
+The current suite contains **88 tests** covering Todo ownership and CRUD behavior, completion-state rules, user registration and authentication, API token authentication, Todo API CRUD and authorization behavior, JSON error handling, and PostgreSQL-backed reporting behavior including weekly bucketing, cumulative completion rates, per-user window partitions, and scoped reporting.
+
+The suite also covers the asynchronous notification path end to end: durable sync-job creation alongside the Todo completion, job claiming including lease expiry, reclaiming abandoned `processing` rows, and `SKIP LOCKED` behavior under a competing lock, retry scheduling with exponential backoff and the transition to `dead_letter` once attempts are exhausted, worker behavior for success, HTTP failure, and unexpected exceptions, runner wiring and configuration, email-client request construction and error propagation, and email-stub validation and idempotency.
 
 The test fixture creates and drops its schema in `todo_test`, so **do not point `TEST_DATABASE_URL` at the application `todo` database**.
 
@@ -319,6 +340,63 @@ If a Todo ID belongs to another user, the API returns `404 Not Found`, the same 
 
 Returning `404 Not Found` instead of `403 Forbidden` avoids revealing whether a Todo with that ID exists under another user's account. A `403 Forbidden` response could disclose the existence of another user's Todo even though the requesting user is not authorized to access it.
 
+## Background Jobs and Completion Notifications
+
+Marking a Todo complete also notifies the owning user by email. That notification is **not** sent during the HTTP request. Instead, completing a Todo records a durable `SyncJob` row, and a separate background worker delivers it.
+
+### Lifecycle
+
+```text
+Todo marked complete
+        ↓
+Todo + SyncJob committed together
+        ↓
+worker claims eligible job
+        ↓
+email POST
+   ↙             ↘
+success          HTTP failure
+  ↓                  ↓
+succeeded      retry_pending
+                    ↓
+              exponential backoff
+                    ↓
+              dead_letter after
+              max attempts
+```
+
+The Todo update and the `SyncJob` row are written in the same database transaction, so a completion is never acknowledged without its notification being durably queued, and a queued notification never refers to a completion that was rolled back.
+
+### Claiming, leases, and `SKIP LOCKED`
+
+A worker claims exactly one eligible row per cycle using a `SELECT ... FOR UPDATE SKIP LOCKED` query, then marks it `processing` and stamps it with a lease expiry before committing. A row is eligible when it is `pending` or `retry_pending` with `next_attempt_at` in the past, or `processing` with an expired lease.
+
+`SKIP LOCKED` is what makes concurrency safe without coordination: if another worker already holds the lock on the oldest eligible row, this worker skips past it and takes the next one rather than blocking on it. The lease covers the other failure mode — a worker that crashes mid-delivery leaves its job stuck in `processing`, and once the lease expires the row becomes eligible again and another worker reclaims it.
+
+Delivery requests are made idempotently. Each job carries an `idempotency_key` that is sent to the email service as an `Idempotency-Key` header, so a receiving email service that honors the key can suppress duplicate delivery after a crash or ambiguous timeout.
+
+### Worker configuration
+
+The worker reads its tuning from the environment. Compose sets these on the `worker` service, and `.env.example` lists them for local runs.
+
+| Variable | Default | Purpose |
+|---|---|---|
+| `EMAIL_SERVICE_URL` | *(required)* | Base URL of the email service. The worker refuses to start without it. |
+| `SYNC_JOB_POLL_INTERVAL_SECONDS` | `1` | How long the worker sleeps when it finds no eligible job. When work is available it loops without sleeping. |
+| `SYNC_JOB_MAX_ATTEMPTS` | `3` | Failed attempts allowed before a job is moved to `dead_letter` and stops being retried. |
+| `SYNC_JOB_BASE_DELAY_SECONDS` | `2` | Base for exponential retry timing. |
+
+The delay is a base, not a fixed interval: retry *n* is scheduled `base × 2^(n-1)` seconds out. With the default base of `2`, a first failure retries in roughly 2 seconds and a second in roughly 4 seconds, after which `SYNC_JOB_MAX_ATTEMPTS` terminates further retries. Backoff is scheduled in the database via `next_attempt_at` rather than by sleeping, so a failing job never blocks the worker from processing other jobs.
+
+### Running the worker manually
+
+Under Compose the worker starts automatically. To run it on the host instead, set `EMAIL_SERVICE_URL` along with the usual `SECRET_KEY` and `DATABASE_URL`, then:
+
+```bash
+cd app
+uv run python -m services.sync_job_runner
+```
+
 ## Database Migrations
 
 The project uses Flask-Migrate, backed by Alembic, to version PostgreSQL schema changes.
@@ -335,6 +413,8 @@ uv run flask --app app db upgrade
 
 Generated migration files live in `app/migrations/versions/` and should be reviewed before they are applied.
 
+The `sync_jobs` table carries a composite index on `(status, next_attempt_at)` to support the frequently polled pending/retry branch of the worker's claim query. The claim query also has a second branch for reclaiming expired `processing` leases, which is matched on `lease_expires_at` and is not covered by this index.
+
 ## Design Decisions
 
 **User ownership is passed into the service layer explicitly.** The server-rendered HTML controllers read `user_id` from the Flask session, while API controllers resolve the user from the Bearer token and use `g.user_id`. Both paths then pass the authenticated user ID into the same ownership-aware service layer rather than allowing services to depend directly on session or request authentication state. This keeps business logic easier to test, reusable across both interfaces, and less tightly coupled to Flask.
@@ -346,6 +426,10 @@ Generated migration files live in `app/migrations/versions/` and should be revie
 **Development and test databases are isolated.** The application uses the `todo` PostgreSQL database, while pytest uses `todo_test`, created by the PostgreSQL initialization script. This prevents destructive test cleanup from touching development data and ensures tests run against the same database engine as the application.
 
 **Todo completion stores both `completed` and `completed_at`.** The explicit Boolean keeps service and template logic easy to read, while the timestamp supports reporting. `TodoService.toggle_complete()` owns the invariant so reopening a Todo also clears its completion timestamp.
+
+**Completion notifications are persisted as `SyncJob` rows instead of being emailed during the request.** Sending email inline would tie the user-visible completion request to the availability and latency of an external service: a slow provider would slow every completion, and a failed call would either lose the notification silently or fail a Todo update that actually succeeded. Writing the job in the same transaction as the completion makes the two atomic — the notification is durable the moment the completion is, and it survives a process restart — while keeping the request path free of any outbound network call.
+
+**The worker claims work with row locking, leases, and scheduled backoff rather than in-process state.** Claiming uses `SELECT ... FOR UPDATE SKIP LOCKED` so that concurrent workers step over each other's locked rows instead of serializing on them, which lets the worker scale out without a broker or leader election. Leases handle crash recovery: a claimed row is only held until its lease expires, so a job abandoned by a dead worker is reclaimable rather than stuck. Retries are scheduled by writing a future `next_attempt_at` instead of sleeping in the worker, so a failing job yields the worker to other work rather than stalling the queue, and jobs that exhaust their attempts land in `dead_letter` where they are visible instead of retried forever. Idempotency keys make the whole scheme safe, since at-least-once delivery is the cost of durability and the key is what keeps a redelivered job from producing a duplicate email.
 
 **Weekly counts can be produced with `GROUP BY`, but cumulative completion statistics need each weekly row to retain its own values while also carrying running totals across earlier weeks for the same user.** A window function handles that ordered, per-user accumulation without collapsing the result set.
 
@@ -360,3 +444,4 @@ Generated migration files live in `app/migrations/versions/` and should be revie
 - Unauthorized Todo update, delete, and completion operations are rejected by the service layer.
 - The application image runs as a non-root `appuser` rather than as root.
 - The PostgreSQL credentials in `compose.yaml` are development defaults and are not intended for deployment.
+- `email_stub` is a local development and test service, not a production email provider. It accepts and logs requests in memory, performs no authentication or real delivery, and loses its idempotency-key set on restart. A deployment should point `EMAIL_SERVICE_URL` at a real provider.
