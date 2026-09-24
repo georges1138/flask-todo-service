@@ -255,7 +255,7 @@ def test_claim_next_job_skips_processing_job_with_active_lease(app):
     assert reloaded_job.lease_expires_at == old_lease
 
 
-def test_skip_locked_returns_none_when_only_job_is_locked(app):
+def test_skip_locked_returns_none_when_only_job_is_locked(committed_data_context):
     now = datetime.now(timezone.utc)
 
     job = SyncJob(
@@ -313,7 +313,7 @@ def test_skip_locked_returns_none_when_only_job_is_locked(app):
         session_b.close()
 
 
-def test_skip_locked_claims_next_available_job(app):
+def test_skip_locked_claims_next_available_job(committed_data_context):
     now = datetime.now(timezone.utc)
 
     first_job = SyncJob(
