@@ -24,7 +24,7 @@ The application supports authenticated users, per-user Todo ownership, completio
 - Custom error handling
 - Versioned PostgreSQL schema migrations with Flask-Migrate / Alembic
 - Single-command Docker Compose environment with orchestrated migrations
-- 88 automated pytest tests running against PostgreSQL, executed in CI on every push
+- 100 automated pytest tests running against PostgreSQL, executed in CI on every push
 - Per-user weekly completion statistics
 - Cumulative completion rates
 
@@ -225,11 +225,13 @@ uv run pytest -v
 ```
 > **Note:** Compose publishes PostgreSQL on localhost:5432 so host-side Flask development and pytest can connect to the containerized database.
 
-The current suite contains **88 tests** covering Todo ownership and CRUD behavior, completion-state rules, user registration and authentication, API token authentication, Todo API CRUD and authorization behavior, JSON error handling, and PostgreSQL-backed reporting behavior including weekly bucketing, cumulative completion rates, per-user window partitions, and scoped reporting.
+The current suite contains **100 tests** covering Todo ownership and CRUD behavior, completion-state rules, user registration and authentication, API token authentication, Todo API CRUD and authorization behavior, JSON error handling, and PostgreSQL-backed reporting behavior including weekly bucketing, cumulative completion rates, per-user window partitions, and scoped reporting.
 
 The suite also covers the asynchronous notification path end to end: durable sync-job creation alongside the Todo completion, job claiming including lease expiry, reclaiming abandoned `processing` rows, and `SKIP LOCKED` behavior under a competing lock, retry scheduling with exponential backoff and the transition to `dead_letter` once attempts are exhausted, worker behavior for success, HTTP failure, and unexpected exceptions, runner wiring and configuration, email-client request construction and error propagation, and email-stub validation and idempotency.
 
-The test fixture creates and drops its schema in `todo_test`, so **do not point `TEST_DATABASE_URL` at the application `todo` database**.
+Most tests share a database schema created once per pytest session and run inside a pytest-managed outer transaction that is rolled back after each test. The `SKIP LOCKED` concurrency tests instead use the `committed_data_context` fixture: their setup jobs must be genuinely committed so independent worker connections can see and compete to lock them. That fixture deletes the committed test data afterward while keeping the schema in place.
+
+The test schema is created once at the beginning of the pytest session and dropped when the session ends. Test fixtures also verify that the connected database is named `todo_test` before performing schema changes or committed-data cleanup. **Do not point `TEST_DATABASE_URL` at the application `todo` database.**
 
 ### Continuous Integration
 
